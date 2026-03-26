@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Arduino Web IDE</title>
+
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: 'Inter', sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+
+  /* TOP BAR */
+  #top-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 15px;
+    background: #020617;
+    border-bottom: 1px solid #1e293b;
+  }
+
+  select, button {
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #e2e8f0;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+
+  select {
+    min-width: 200px;
+  }
+
+  button {
+    transition: all 0.2s ease;
+  }
+
+  button:hover {
+    background: #334155;
+    transform: translateY(-1px);
+  }
+
+  button:active {
+    transform: translateY(0);
+  }
+
+  /* PRIMARY ACTION */
+  #upload-btn {
+    background: #22c55e;
+    border: none;
+    color: #020617;
+    font-weight: 600;
+  }
+
+  #upload-btn:hover {
+    background: #16a34a;
+  }
+
+  #compile-btn {
+    background: #3b82f6;
+    border: none;
+  }
+
+  #compile-btn:hover {
+    background: #2563eb;
+  }
+
+  /* EDITOR */
+  #editor {
+    flex: 1;
+  }
+
+  /* SERIAL MONITOR */
+  #serial-monitor {
+    height: 180px;
+    background: #020617;
+    border-top: 1px solid #1e293b;
+    padding: 10px;
+    font-family: monospace;
+    font-size: 13px;
+    color: #22c55e;
+    overflow-y: auto;
+  }
+  
+  #agent-status {
+    margin-left: auto;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 4px;
+  }
+
+  /* STATUS / ERROR */
+  .error {
+    color: #f97316;
+  }
+  
+  .status-online { color: #22c55e; }
+  .status-offline { color: #ef4444; background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; }
+  
+</style>
+
+<!-- Monaco -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.38.0/min/vs/loader.min.js"></script>
+</head>
+
+<body>
+
+<div id="top-bar">
+  <select id="port-select"></select>
+  <button id="refresh-ports-btn">Refresh</button>
+  <button id="connect-btn">Connect</button>
+  <button id="compile-btn">Compile</button>
+  <button id="upload-btn">Upload</button>
+  <button id="clear-serial-btn">Clear</button>
+  <div id="agent-status" class="status-offline">Checking Agent...</div>
+</div>
+
+<div id="editor"></div>
+<div id="serial-monitor"></div>
+
+<script>
+let editor;
+let ws;
+let connectedPort;
+
+// Monaco
+require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.38.0/min/vs' }});
+require(['vs/editor/editor.main'], function() {
+  editor = monaco.editor.create(document.getElementById('editor'), {
+    value: `void setup() {\n  Serial.begin(9600);\n  Serial.println("Hello!");\n}\n\nvoid loop() {\n  Serial.println(millis());\n  delay(1000);\n}`,
+    language: 'cpp',
+    theme: 'vs-dark',
+    fontSize: 14,
+    minimap: { enabled: false }
+  });
+});
+
+// UI helpers
+function logToSerial(msg, isError = false) {
+  const monitor = document.getElementById('serial-monitor');
+  const line = document.createElement('div');
+  line.textContent = msg;
+  if (isError) line.classList.add('error');
+  monitor.appendChild(line);
+  monitor.scrollTop = monitor.scrollHeight;
+}
+
+// Heartbeat to check if Agent is running
+async function checkAgentStatus() {
+  const statusEl = document.getElementById('agent-status');
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second timeout
+    
+    const res = await fetch('http://127.0.0.1:3210/status', { signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    statusEl.textContent = "● Agent Online";
+    statusEl.className = "status-online";
+  } catch (err) {
+    statusEl.textContent = "⚠ Offline: Open Arduino Agent";
+    statusEl.className = "status-offline";
+  }
+}
+
+// Fetch ports
+async function fetchPorts() {
+  try {
+    const res = await fetch('http://127.0.0.1:3210/ports');
+    const ports = await res.json();
+
+    const select = document.getElementById('port-select');
+    select.innerHTML = '';
+
+    ports.forEach(p => {
+      const option = document.createElement('option');
+      option.value = p.port;
+      option.textContent = `${p.port} (${p.label})`;
+      select.appendChild(option);
+    });
+
+    logToSerial("Ports refreshed");
+  } catch (err) {
+    logToSerial("Agent not detected", true);
+  }
+}
+
+// Serial
+async function connectSerial() {
+  const port = document.getElementById('port-select').value;
+  if (!port) return alert("Select port");
+
+  if (ws) ws.close();
+
+  ws = new WebSocket('ws://127.0.0.1:3211');
+
+  ws.onmessage = (event) => {
+    logToSerial(event.data);
+  };
+
+  await fetch('http://127.0.0.1:3210/serial/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ port, baudRate: 9600 })
+  });
+
+  logToSerial("Connected to " + port);
+}
+
+// Compile
+async function compileSketch() {
+  const code = editor.getValue();
+
+  const res = await fetch('http://127.0.0.1:3210/compile', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code })
+  });
+
+  const data = await res.json();
+
+  logToSerial(data.success ? "Compile success" : "Compile failed", !data.success);
+}
+
+// Upload
+async function uploadSketch() {
+  const port = document.getElementById('port-select').value;
+  const code = editor.getValue();
+
+  if (!port) return alert("Select port");
+
+  logToSerial("Uploading...");
+
+  const res = await fetch('http://127.0.0.1:3210/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ port, code })
+  });
+
+  const data = await res.json();
+
+  logToSerial(data.success ? "Upload success" : "Upload failed", !data.success);
+}
+
+// Events
+document.getElementById('refresh-ports-btn').onclick = fetchPorts;
+document.getElementById('connect-btn').onclick = connectSerial;
+document.getElementById('compile-btn').onclick = compileSketch;
+document.getElementById('upload-btn').onclick = uploadSketch;
+document.getElementById('clear-serial-btn').onclick = () => {
+  document.getElementById('serial-monitor').innerHTML = '';
+};
+
+// Init
+checkAgentStatus();
+setInterval(checkAgentStatus, 5000); // Poll every 5 seconds
+fetchPorts();
+</script>
+
+</body>
+</html>

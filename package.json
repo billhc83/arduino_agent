@@ -1,0 +1,45 @@
+{
+  "name": "arduino-agent",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "devDependencies": {
+    "electron": "^41.0.3",
+    "electron-builder": "^26.8.1"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "serialport": "^10.5.0",
+    "@serialport/parser-readline": "^10.5.0",
+    "ws": "^8.13.0"
+  },
+  "build": {
+  "appId": "com.arduino.agent",
+  "productName": "Arduino Agent",
+  "directories": {
+    "output": "dist"
+  },
+  "files": [
+    "**/*"
+  ],
+  "extraResources": [
+    {
+      "from": "data",
+      "to": "data"
+    }
+  ],
+  "win": {
+    "target": "nsis"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": true,
+    "allowToChangeInstallationDirectory": true
+  }
+}
+}

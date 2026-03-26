@@ -1,0 +1,33 @@
+node_modules/
+
+# Electron build output
+dist/
+build/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+
+# Editor/IDE files
+.vs/
+.idea/
+*.suo
+*.user
+*.vscode/
+
+# Temporary files / editor backups
+*.log
+*.tmp
+*.swp
+
+# Arduino CLI / compiled binaries
+data/arduino-cli.exe
+data/build/
+data/*.hex
+
+# Python cache
+__pycache__/
+*.pyc
+
+data/
